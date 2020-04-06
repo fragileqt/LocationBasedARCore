@@ -3,8 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/LocationBasedARCore.iml" filepath="$PROJECT_DIR$/LocationBasedARCore.iml" group="LocationBasedARCore" />
-      <module fileurl="file://$PROJECT_DIR$/app/app.iml" filepath="$PROJECT_DIR$/app/app.iml" group="LocationBasedARCore/app" />
-      <module fileurl="file://$PROJECT_DIR$/locationbasedar/locationbasedar.iml" filepath="$PROJECT_DIR$/locationbasedar/locationbasedar.iml" group="LocationBasedARCore/locationbasedar" />
+      <module fileurl="file://$PROJECT_DIR$/mylibrary/mylibrary.iml" filepath="$PROJECT_DIR$/mylibrary/mylibrary.iml" group="LocationBasedARCore/mylibrary" />
     </modules>
   </component>
 </project>
