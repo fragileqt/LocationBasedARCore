@@ -19,7 +19,7 @@ class CompassSensorManager(context: Context) : SensorEventListener {
     private val temporaryRotationMatrix = FloatArray(9)
     private val rotationMatrix = FloatArray(9)
     private val orientationData = FloatArray(3)
-    private var accelerometerData: SensorDataHolder = SensorDataHolder(.25f)
+    private var accelerometerData: SensorDataHolder = SensorDataHolder(.15f)
     private var magneticData: SensorDataHolder = SensorDataHolder(0f)
 
     val magneticNorthAzimuthSubject = BehaviorSubject.create<Float>()
@@ -32,8 +32,8 @@ class CompassSensorManager(context: Context) : SensorEventListener {
 
     fun onResume() {
         isSuspended = false
-        sensorManager.registerListener(this, accelerometerSensor, SensorManager.SENSOR_DELAY_UI)
-        sensorManager.registerListener(this, magneticFieldSensor, SensorManager.SENSOR_DELAY_UI)
+        sensorManager.registerListener(this, accelerometerSensor, SensorManager.SENSOR_DELAY_GAME)
+        sensorManager.registerListener(this, magneticFieldSensor, SensorManager.SENSOR_DELAY_GAME)
     }
 
     fun onPause() {
@@ -41,7 +41,7 @@ class CompassSensorManager(context: Context) : SensorEventListener {
         sensorManager.unregisterListener(this, accelerometerSensor)
         sensorManager.unregisterListener(this, magneticFieldSensor)
     }
-    val avg = AverageAngle(10)
+    val avg = AverageAngle(60)
     override fun onSensorChanged(event: SensorEvent) {
         val sensorType = event.sensor.type
         if (sensorType == Sensor.TYPE_ACCELEROMETER) accelerometerData.update(event.values)

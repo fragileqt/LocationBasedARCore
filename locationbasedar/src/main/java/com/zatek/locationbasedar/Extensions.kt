@@ -36,9 +36,15 @@ fun Location.toLocalCoordinates(currentLocation: Location): Vector3 {
     return Vector3(mapped[0].toFloat(), mapped[1].toFloat(), mapped[2].toFloat())
 }
 
-fun Vector3.toWorldCoordinates(worldPosition: Vector3, worldLocation: Location): Location{
-    val ecef = GeoUtils.ECEF(this.scaled(1.008f), worldLocation)
-    return GeoUtils.WSG(ecef)
+fun Vector3.toWorldCoordinates(worldLocation: Location): Location{
+    val ecef = GeoUtils.enuToECEF(this.let{
+        Vector3(
+            it.x,
+            it.z*-1,
+            it.y
+        )
+    }, worldLocation)
+    return GeoUtils.ecefToGeo(ecef)
 }
 
 fun Quaternion.extractRotation(rotation: Vector3): Quaternion{

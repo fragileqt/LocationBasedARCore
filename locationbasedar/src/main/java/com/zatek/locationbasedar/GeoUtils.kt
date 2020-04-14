@@ -9,25 +9,23 @@ import kotlin.math.*
 object GeoUtils {
 
     fun convertGpsToECEF(
-        lat: Double,
-        longi: Double,
-        alt: Float
+        location: Location
     ): Vector3 {
         val a = 6378137.0
         val b = 6356752.3142
         val e = 1 - b.pow(2.0) / a.pow(2.0)
         val n = a / sqrt(
             1.0 - e * sin(
-                Math.toRadians(lat)
+                Math.toRadians(location.latitude)
             ).pow(2.0)
         )
-        val cosLatRad = cos(Math.toRadians(lat))
-        val cosLongiRad = cos(Math.toRadians(longi))
-        val sinLatRad = sin(Math.toRadians(lat))
-        val sinLongiRad = sin(Math.toRadians(longi))
-        val x = (n + alt) * cosLatRad * cosLongiRad
-        val y = (n + alt) * cosLatRad * sinLongiRad
-        val z = (b.pow(2.0) / a.pow(2.0) * n + alt) * sinLatRad
+        val cosLatRad = cos(Math.toRadians(location.latitude))
+        val cosLongiRad = cos(Math.toRadians(location.longitude))
+        val sinLatRad = sin(Math.toRadians(location.latitude))
+        val sinLongiRad = sin(Math.toRadians(location.longitude))
+        val x = (n + location.altitude) * cosLatRad * cosLongiRad
+        val y = (n + location.altitude) * cosLatRad * sinLongiRad
+        val z = (b.pow(2.0) / a.pow(2.0) * n + location.altitude) * sinLatRad
         val ecef = Vector3()
         ecef.x = x.toFloat()
         ecef.y = y.toFloat()
@@ -64,22 +62,18 @@ object GeoUtils {
     ): List<Double> {
         try {
             val myECEFLocation = convertGpsToECEF(
-                currentLocation.latitude,
-                currentLocation.longitude,
-                currentLocation.altitude.toFloat()
+                currentLocation
             )
             val targetECEFLocation = convertGpsToECEF(
-                targetLocation.latitude,
-                targetLocation.longitude,
-                targetLocation.altitude.toFloat()
+                targetLocation
             )
             val enuLocation = convertECEFtoENU(
-                myECEFLocation,
                 targetECEFLocation,
+                myECEFLocation,
                 targetLocation.latitude,
                 targetLocation.longitude
             )
-            return listOf(enuLocation.e * -1, enuLocation.u, enuLocation.n)
+            return listOf(enuLocation.e, enuLocation.u, enuLocation.n * -1)
         } catch (e: Exception) {
             print(e)
         }
@@ -88,58 +82,30 @@ object GeoUtils {
 
     fun enuToECEF(
         poiPositionDefault: Vector3,
-        worldPosition: Vector3,
         worldLocation: Location
     ): Vector3 {
         val myEcef = convertGpsToECEF(
-            worldLocation.latitude,
-            worldLocation.longitude,
-            worldLocation.altitude.toFloat()
+            worldLocation
         )
-        val myEnu = convertECEFtoENU(myEcef,myEcef,worldLocation.latitude,worldLocation.longitude)
         val poiPosition = Vector3(
-            poiPositionDefault.x - worldPosition.x,
-            myEnu.u.toFloat(),
-            poiPositionDefault.z - worldPosition.z
+            poiPositionDefault.x,
+            poiPositionDefault.y,
+            poiPositionDefault.z
         )
 
-
-
-        val result = FloatArray(4)
         val cosLat = cos(Math.toRadians(worldLocation.latitude))
         val cosLon = cos(Math.toRadians(worldLocation.longitude))
         val sinLat = sin(Math.toRadians(worldLocation.latitude))
         val sinLon = sin(Math.toRadians(worldLocation.longitude))
-        val first = floatArrayOf(
-            (-1f * sinLon).toFloat(),
-            (-1f * sinLat * cosLon).toFloat(),
-            (cosLat * cosLon).toFloat(),
-            0f,
-            cosLon.toFloat(),
-            (-1f * sinLat * sinLon).toFloat(),
-            (cosLat * sinLon).toFloat(),
-            0f,
-            0f,
-            (cosLat).toFloat(),
-            (sinLat).toFloat(),
-            0f,
-            0f,
-            0f,
-            0f,
-            0f
-        )
-        Matrix.multiplyMV(
-            result,
-            0,
-            first,
-            0,
-            floatArrayOf(poiPosition.x*-1,poiPosition.z ,poiPosition.y,0f),
-            0
-        )
+
+        val x = (-1f * sinLon) * poiPosition.x + (-1f * sinLat * cosLon) * poiPosition.y + (cosLat * cosLon) * poiPosition.z
+        val y = cosLon * poiPosition.x + (-1f * sinLat * sinLon) * poiPosition.y + (cosLat * sinLon)*poiPosition.z
+        val z =  (cosLat) * poiPosition.y + (sinLat) * poiPosition.z
+
         return Vector3.add(Vector3(
-            result[0],
-            result[1],
-            result[2]
+            x.toFloat(),
+            y.toFloat(),
+            z.toFloat()
         ),myEcef)
     }
 
@@ -192,97 +158,6 @@ object GeoUtils {
             altitude = h
         }
     }
-
-    fun WSG(ecef: Vector3): Location{
-        val xPos = ecef.x.toDouble()
-        val yPos = ecef.y.toDouble()
-        val zPos = ecef.z.toDouble()
-
-        val a = 6378137.0
-        val erf = 1.0/298.257223563
-        val b = a*
-                (1.0-erf)
-
-
-        val erfs = 2*erf-Math.pow(erf, 2.0)
-
-        val asq = Math.pow(a, 2.0)
-        val bsq = Math.pow(b, 2.0)
-
-        val ep = Math.sqrt((asq - bsq) / bsq)
-
-        val p =
-            Math.sqrt(Math.pow(xPos, 2.0) + Math.pow(yPos, 2.0))
-
-        val th = Math.atan2(
-            a *
-                    zPos, b * p
-        )
-
-        var long = Math.atan2(yPos, xPos)
-
-        val lat = Math.atan2(
-            zPos + Math.pow(ep, 2.0) *
-                    b * Math.pow(
-                Math.sin(th),
-                3.0
-            ),
-            p - erfs *
-                    a *
-                    Math.pow(Math.cos(th), 3.0)
-        )
-
-        val n: Double = a /
-                Math.sqrt(
-                    1 - erfs *
-                            Math.pow(Math.sin(lat), 2.0)
-                )
-
-
-        val alt = p / Math.cos(lat) - n
-        long = long % (2 * Math.PI)
-
-        return Location("").apply {
-            latitude  = Math.toDegrees(lat)
-            longitude = Math.toDegrees(long)
-            altitude = alt
-        }
-    }
-
-    fun ECEF(
-        eastNorthUp: Vector3,
-        refPt: Location
-    ) :Vector3 { //ENU translation requires a reference point in the
-//Earth-Centered, Earth-Fixed frame
-        val ecef = Vector3()
-        val refECEF = convertGpsToECEF(refPt.latitude, refPt.longitude, refPt.altitude.toFloat())
-        ecef.x = (-1 * Math.sin(refECEF.x.toDouble()) *
-                    eastNorthUp.x -
-                    Math.cos(refPt.longitude) *
-                    Math.sin(refPt.latitude) *
-                    eastNorthUp.y +
-                    Math.cos(refPt.longitude) *
-                    Math.cos(refPt.latitude) *
-                    eastNorthUp.z +
-                    refECEF.x).toFloat()
-        ecef.y = (
-            Math.cos(refPt.longitude) *
-                    eastNorthUp.x -
-                    Math.sin(refPt.longitude) *
-                    Math.sin(refPt.latitude) *
-                    eastNorthUp.y +
-                    Math.cos(refPt.latitude) *
-                    Math.sin(refPt.longitude) *
-                    eastNorthUp.z +
-                    refECEF.y).toFloat()
-        ecef.z = (
-            Math.cos(refPt.latitude) *
-                    eastNorthUp.y + Math.sin(refPt.latitude) *
-                    eastNorthUp.z +
-                    refECEF.z).toFloat()
-        return ecef
-    }
-
 }
 
 private fun Double.root(i: Int): Double {

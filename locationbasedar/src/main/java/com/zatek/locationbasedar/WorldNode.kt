@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.hardware.GeomagneticField
 import android.location.Location
+import android.widget.Toast
 import com.google.ar.core.Camera
 import com.google.ar.sceneform.*
 import com.google.ar.sceneform.math.Vector3
@@ -76,7 +77,7 @@ class WorldNode private constructor(
     private val refreshSubject = BehaviorSubject.create<Long>()
 
     fun getEstimatedLocation(): Location =
-        arScene.camera.worldPosition.toWorldCoordinates(worldPosition, mostAccurateLocation)
+        arScene.camera.worldPosition.toWorldCoordinates(mostAccurateLocation)
 
     fun setLocation(location: Location) {
         locationUpdateSubject.onNext(location)
@@ -208,6 +209,7 @@ class WorldNode private constructor(
         isActivatedSubject.onNext(false)
     }
 
+    var storedLatestPosition = Vector3.zero()
     override fun onUpdate(frameTime: FrameTime?) {
         super.onUpdate(frameTime)
         frameTime?.let {
@@ -215,9 +217,11 @@ class WorldNode private constructor(
                 cameraSubject.onNext(it)
             }
         }
-        if (childrenSize != getRealSize()) {
+        if (childrenSize != getRealSize() || worldPosition != storedLatestPosition) {
             childrenSize = getRealSize()
             refreshSubject.onNext(System.currentTimeMillis())
+            storedLatestPosition = worldPosition
+            Toast.makeText(fragment.context, "Pose updated", Toast.LENGTH_LONG).show()
         }
         requestPermissionSubject.onNext(Unit)
     }
