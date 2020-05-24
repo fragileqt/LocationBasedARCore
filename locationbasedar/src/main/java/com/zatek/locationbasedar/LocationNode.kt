@@ -3,6 +3,7 @@ package com.zatek.locationbasedar
 import android.location.Location
 import com.google.ar.sceneform.NodeParent
 import com.google.ar.sceneform.math.Vector3
+import com.zatek.locationbasedar.utils.toLocalCoordinates
 
 class LocationNode private constructor(val location: Location, val config: Config) : LocationBasedNode() {
 

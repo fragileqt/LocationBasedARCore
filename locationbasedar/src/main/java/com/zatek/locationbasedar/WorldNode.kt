@@ -7,13 +7,19 @@ import android.hardware.GeomagneticField
 import android.location.Location
 import android.widget.Toast
 import com.google.ar.core.Camera
+import com.google.ar.core.Plane
+import com.google.ar.core.Trackable
 import com.google.ar.sceneform.*
 import com.google.ar.sceneform.math.Vector3
 import com.google.ar.sceneform.ux.ArFragment
 import com.tbruyelle.rxpermissions2.RxPermissions
-import io.nlopez.smartlocation.SmartLocation
+import com.zatek.locationbasedar.repositories.CompassSensorRepository
+import com.zatek.locationbasedar.repositories.LocationRepository
+import com.zatek.locationbasedar.utils.doOn
+import com.zatek.locationbasedar.utils.northRotation
+import com.zatek.locationbasedar.utils.toWorldCoordinates
+import com.zatek.locationbasedar.utils.with
 import io.reactivex.disposables.CompositeDisposable
-import io.reactivex.rxkotlin.Observables
 import io.reactivex.rxkotlin.withLatestFrom
 import io.reactivex.schedulers.Schedulers
 import io.reactivex.subjects.BehaviorSubject
@@ -31,63 +37,50 @@ class WorldNode private constructor(
     private val context: Context = fragment.requireContext()
     private val rxPermissions: RxPermissions = RxPermissions(fragment)
 
+    private val locationRepository = LocationRepository(config, context, onReferencingLocationChangedListener)
+
     private val compassSensorManager by lazy {
-        CompassSensorManager(context)
+        CompassSensorRepository(context)
     }
 
     private val compositeDisposable = CompositeDisposable()
 
     private val requestPermissionSubject = BehaviorSubject.create<Unit>()
     private val permissionsGrantedSubject = BehaviorSubject.createDefault(false)
-
-    private val locationUpdateSubject = BehaviorSubject.create<Location>()
     private val isActivatedSubject = BehaviorSubject.create<Boolean>()
 
     private val updateSubject = BehaviorSubject.createDefault(true)
-
-    private val latestAccuracy = BehaviorSubject.createDefault(Float.MAX_VALUE)
 
     private val cameraSubject = BehaviorSubject.create<Camera>()
 
     private var childrenSize = 0
 
-    var mostAccurateLocation: Location = Location("")
-        private set
+    val mostAccurateLocation: Location get() = locationRepository.mostAccurateLocation
 
-    private val mostAccurateLocationSubject =
-        locationUpdateSubject.withLatestFrom(latestAccuracy, updateSubject).filter {
-            (
-                    (
-                            config.updateOnMoreAccurateLocation &&
-                                    it.first.accuracy <= config.locationAccuracyThreshold
-                                    && (it.first.accuracy < it.second || it.first.distanceTo(
-                                mostAccurateLocation
-                            ) > config.updateIntervalInMeters)
-                            )
-                            || config.updateOnMoreAccurateLocation.not()
-                    )
-                    && it.third
-        }.subscribeOn(Schedulers.io()).map {
-            onReferencingLocationChangedListener?.locationChanged(it.first)
-            mostAccurateLocation = it.first
-            latestAccuracy.onNext(it.first.accuracy)
-            it.first
-        }.share()
+    private val mostAccurateLocationSubject = locationRepository.mostAccurateSubject.share()
 
     private val refreshSubject = BehaviorSubject.create<Long>()
 
-    fun getEstimatedLocation(): Location =
-        arScene.camera.worldPosition.toWorldCoordinates(mostAccurateLocation)
+    fun getEstimatedLocation(): Location {
+        val node = Node()
+        node.setParent(this)
+        node.worldPosition = arScene.camera.worldPosition
+        return node.localPosition.toWorldCoordinates(mostAccurateLocation).also{
+            node.setParent(null)
+        }
+    }
 
     fun setLocation(location: Location) {
-        locationUpdateSubject.onNext(location)
+        locationRepository.setLocation(location)
     }
 
     fun stopUpdates() {
+        locationRepository.stopUpdates()
         updateSubject.onNext(false)
     }
 
     fun startUpdates() {
+        locationRepository.startUpdates()
         updateSubject.onNext(true)
     }
 
@@ -97,33 +90,41 @@ class WorldNode private constructor(
 
     private fun init() {
         this.setParent(arScene)
-        arScene.camera.farClipPlane = config.maxRenderingDistance
 
+        arScene.camera.farClipPlane = config.maxRenderingDistance
 
         if (config.receiveLocationUpdates)
             compositeDisposable.add(
-                requestPermissionSubject.withLatestFrom(permissionsGrantedSubject).filter{
-                    it.second.not()
-                }.switchMap {
-                    rxPermissions.requestEachCombined(
-                        Manifest.permission.ACCESS_FINE_LOCATION,
-                        Manifest.permission.ACCESS_COARSE_LOCATION
-                    )
-                }.subscribe({
-                    if (it.granted) {
-                        permissionGranted()
-                    }
-                    permissionsGrantedSubject.onNext(it.granted)
-                }, {
-                })
+                requestPermissionSubject
+                    .withLatestFrom(permissionsGrantedSubject)
+                    .filter {
+                        it.second.not()
+                    }.switchMap {
+                        rxPermissions.requestEachCombined(
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION
+                        )
+                    }.subscribe({
+                        if (it.granted) {
+                            permissionGranted()
+                        }
+                        permissionsGrantedSubject.onNext(it.granted)
+                    }, {
+                        it.printStackTrace()
+                    })
             )
         compositeDisposable.addAll(
-            compassSensorManager.magneticNorthAzimuthSubject
-                .withLatestFrom(
-                    mostAccurateLocationSubject
-                )
+            // Update rotácie uzlu
+            doOn(
+                compassSensorManager.magneticNorthAzimuthSubject,
+                compassSensorManager.accuracySubject
+            ).with(
+                compassSensorManager.magneticNorthAzimuthSubject,
+                compassSensorManager.accuracySubject,
+                mostAccurateLocationSubject
+            )
                 .subscribeOn(Schedulers.io())
-                .subscribe { (azimuth, location) ->
+                .subscribe { (azimuth, accuracy, location) ->
                     val geoField = GeomagneticField(
                         location.latitude.toFloat(),
                         location.longitude.toFloat(),
@@ -133,39 +134,41 @@ class WorldNode private constructor(
 
                     val direction: Float = azimuth + geoField.declination
 
-                    onCompassRotationChangedListener?.rotationChanged(direction)
+                    onCompassRotationChangedListener?.rotationChanged(direction, accuracy)
                 },
-            Observables.combineLatest(
-                isActivatedSubject,
+            // Update rotácie a pozície
+            doOn(
+                isActivatedSubject.filter{ it },
+                mostAccurateLocationSubject
+            ).with(
                 mostAccurateLocationSubject,
-                updateSubject
-            ).withLatestFrom(compassSensorManager.magneticNorthAzimuthSubject).filter { it.first.first && it.first.third }
-                .subscribe {
-                    val frame = (this.arScene.view as ArSceneView).arFrame
-                    val camera = this.arScene.camera
-                    val view = this.arScene.view
-                    val floorY = frame?.let { frame ->
-                        val points = frame.hitTest(
-                            (view?.width?.toFloat() ?: 0f) / 2,
-                            view?.height?.toFloat() ?: 0f
-                        )
-                        points.firstOrNull()?.hitPose?.ty()
-                    } ?: 0f
-                    this.worldPosition = Vector3(0f, floorY, 0f)
-                    val location = it.first.second
-                    if (config.northRotated)
-                        this.worldRotation = camera?.northRotation(it.second, location)
-                    (this as NodeParent).children.forEach {
-                        if (it is LocationBasedNode)
-                            it.update(location)
-                    }
-                },
-            Observables.combineLatest(
+                compassSensorManager.magneticNorthAzimuthSubject
+            ).subscribe { (location, rotation) ->
+                val frame = (this.arScene.view as ArSceneView).arFrame
+                val camera = this.arScene.camera
+                val view = this.arScene.view
+                val floorY = frame?.let { frame ->
+                    val points = frame.hitTest(
+                        (view?.width?.toFloat() ?: 0f) / 2,
+                        view?.height?.toFloat() ?: 0f
+                    )
+                    points.find { it is Plane }?.hitPose?.ty()
+                } ?: 0f
+                this.worldPosition = Vector3(camera.worldPosition.x, floorY, camera.worldPosition.z)
+                if (config.northRotated)
+                    this.worldRotation = camera?.northRotation(rotation, location)
+                (this as NodeParent).children.forEach {
+                    if (it is LocationBasedNode)
+                        it.update(location)
+                }
+            },
+            doOn(
                 refreshSubject.distinctUntilChanged(),
                 mostAccurateLocationSubject
             )
+                .with(mostAccurateLocationSubject)
                 .subscribeOn(Schedulers.io())
-                .subscribe { (_, location) ->
+                .subscribe { location ->
                     children.forEach {
                         when (it) {
                             is LocationNode -> it.update(location)
@@ -178,17 +181,7 @@ class WorldNode private constructor(
 
     @SuppressLint("MissingPermission")
     private fun permissionGranted() {
-        SmartLocation.with(context).location().lastLocation?.let {
-            locationUpdateSubject.onNext(
-                it.apply {
-                    accuracy = config.locationAccuracyThreshold
-                }
-            )
-        }
-        SmartLocation.with(context).location()
-            .start {
-                locationUpdateSubject.onNext(it)
-            }
+        startUpdates()
     }
 
     fun update() {
@@ -205,11 +198,11 @@ class WorldNode private constructor(
     override fun onDeactivate() {
         super.onDeactivate()
         compassSensorManager.onPause()
-        latestAccuracy.onNext(Float.MAX_VALUE)
+        locationRepository.resetAccuracy()
         isActivatedSubject.onNext(false)
     }
 
-    var storedLatestPosition = Vector3.zero()
+    private var storedLatestPosition = Vector3.zero()
     override fun onUpdate(frameTime: FrameTime?) {
         super.onUpdate(frameTime)
         frameTime?.let {
@@ -217,7 +210,7 @@ class WorldNode private constructor(
                 cameraSubject.onNext(it)
             }
         }
-        if (childrenSize != getRealSize() || worldPosition != storedLatestPosition) {
+        if (childrenSize != getRealSize()) {
             childrenSize = getRealSize()
             refreshSubject.onNext(System.currentTimeMillis())
             storedLatestPosition = worldPosition
@@ -299,7 +292,7 @@ class WorldNode private constructor(
     }
 
     interface OnCompassRotationChangedListener {
-        fun rotationChanged(rotation: Float)
+        fun rotationChanged(rotation: Float, accuracy: Int)
     }
 
     init {

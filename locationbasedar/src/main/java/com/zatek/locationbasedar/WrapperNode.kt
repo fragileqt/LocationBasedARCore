@@ -9,7 +9,7 @@ class WrapperNode private constructor(val config: Config) : LocationBasedNode() 
 
     override fun update(location: Location) {
         lastLocation = location
-        localPosition = Vector3(0f, 0f, 0f)
+        //localPosition = Vector3(0f, 0f, 0f)
         worldNode()?.let {
             if (config.scaleWithWorld.not())
                 localScale = Vector3(1f, 1f, 1f).scaled((1 / it.localScale.x))
