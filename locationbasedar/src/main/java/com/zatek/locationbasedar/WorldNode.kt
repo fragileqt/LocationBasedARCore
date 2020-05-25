@@ -214,7 +214,6 @@ class WorldNode private constructor(
             childrenSize = getRealSize()
             refreshSubject.onNext(System.currentTimeMillis())
             storedLatestPosition = worldPosition
-            Toast.makeText(fragment.context, "Pose updated", Toast.LENGTH_LONG).show()
         }
         requestPermissionSubject.onNext(Unit)
     }
